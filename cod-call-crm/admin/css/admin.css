@@ -1,0 +1,14 @@
+.cod-crm-wrap .cod-crm-metrics-grid{display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));gap:12px;margin:16px 0}
+.cod-crm-card{background:#fff;border:1px solid #dcdcde;border-radius:6px;padding:16px;margin:14px 0}
+.cod-crm-card h3,.cod-crm-card h2{margin-top:0}
+.cod-crm-card-value{font-size:28px;font-weight:700;color:#1d2327;margin:0}
+.cod-crm-filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0}
+.cod-crm-status-badge{color:#fff;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:600;display:inline-block}
+.cod-crm-status-pending_call{background:#dba617}.cod-crm-status-confirmed{background:#00a32a}.cod-crm-status-cancelled{background:#d63638}.cod-crm-status-callback_scheduled{background:#0073aa}.cod-crm-status-prepaid_converted{background:#9b59b6}.cod-crm-status-max_attempts_reached{background:#8c1a1a}
+.cod-crm-call-panel{background:#f6f7f7;padding:16px;border:1px solid #dcdcde;border-radius:6px}
+.cod-crm-order-summary{background:#fff;border:1px solid #dcdcde;padding:10px;border-radius:4px;margin-bottom:12px}
+.cod-crm-outcome-form label{display:inline-block;margin-right:12px;margin-bottom:8px}
+.cod-crm-outcome-form textarea{width:100%;min-height:90px}
+.cod-crm-outcome-form input[type="text"],.cod-crm-outcome-form input[type="url"],.cod-crm-outcome-form input[type="datetime-local"]{width:300px;max-width:100%}
+.cod-crm-progress{background:#e2e4e7;border-radius:8px;height:18px;max-width:560px;overflow:hidden;margin-top:8px}
+.cod-crm-progress-bar{background:#0073aa;height:100%;width:0%;transition:width .25s ease}
