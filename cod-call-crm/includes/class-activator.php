@@ -97,6 +97,7 @@ class COD_CRM_Activator {
             'cod_crm_sync_log' => wp_json_encode([]),
             'cod_crm_last_bulk_sync' => '',
             'cod_crm_last_agent_index' => 0,
+            'cod_crm_debug_mode' => 1,
         ];
 
         foreach ($defaults as $k => $v) {

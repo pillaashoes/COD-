@@ -33,15 +33,35 @@ register_activation_hook(__FILE__, ['COD_CRM_Activator', 'activate']);
 register_deactivation_hook(__FILE__, ['COD_CRM_Deactivator', 'deactivate']);
 
 function cod_crm_woocommerce_active(): bool {
+    if (class_exists('WooCommerce') || function_exists('wc_get_order')) {
+        return true;
+    }
+
     $plugins = (array) get_option('active_plugins', []);
     if (in_array('woocommerce/woocommerce.php', $plugins, true)) {
         return true;
     }
+
     if (is_multisite()) {
         $network_plugins = (array) get_site_option('active_sitewide_plugins', []);
         return isset($network_plugins['woocommerce/woocommerce.php']);
     }
+
     return false;
+}
+
+/**
+ * Centralized WooCommerce sync function used by all creation hooks.
+ *
+ * @param int|WC_Order $order_id
+ */
+function cod_crm_sync_order($order_id): void {
+    if (!cod_crm_woocommerce_active()) {
+        error_log('COD CRM Sync Skipped: WooCommerce inactive while trigger fired.');
+        return;
+    }
+
+    COD_CRM_Woo_Sync::cod_crm_sync_order($order_id);
 }
 
 function cod_crm_bootstrap(): void {

@@ -5,41 +5,73 @@ if (!defined('ABSPATH')) {
 
 class COD_CRM_Woo_Sync {
     public static function init(): void {
-        add_action('woocommerce_checkout_order_processed', [__CLASS__, 'handle_checkout_order'], 20, 1);
-        add_action('woocommerce_store_api_checkout_order_processed', [__CLASS__, 'handle_store_api_order'], 20, 1);
+        // Critical: register all order creation hooks.
+        add_action('woocommerce_new_order', 'cod_crm_sync_order', 10, 1);
+        add_action('woocommerce_checkout_order_processed', 'cod_crm_sync_order', 10, 1);
+        add_action('woocommerce_store_api_checkout_order_processed', 'cod_crm_sync_order', 10, 1);
+
         add_action('woocommerce_order_status_changed', [__CLASS__, 'handle_status_changed'], 20, 4);
     }
-
-    public static function handle_checkout_order($order_id): void {
-        if (!(bool) get_option('cod_crm_realtime_sync_enabled', 1)) {
-            return;
+    private static function debug_log(string $message): void {
+        if ((bool) get_option('cod_crm_debug_mode', 1)) {
+            error_log($message);
         }
+    }
+
+
+    public static function cod_crm_sync_order($order_input): bool {
+        global $wpdb;
+        $orders_table = COD_CRM_DB::orders_table();
+
+        $order_id = 0;
+        if ($order_input instanceof WC_Order) {
+            $order_id = (int) $order_input->get_id();
+        } else {
+            $order_id = intval($order_input);
+        }
+
+        self::debug_log('COD CRM Sync Triggered: ' . $order_id);
+
+        if ($order_id <= 0) {
+            self::debug_log('COD CRM Sync Skipped: invalid order_id');
+            return false;
+        }
+
+        if (!(bool) get_option('cod_crm_realtime_sync_enabled', 1)) {
+            self::debug_log('COD CRM Sync Skipped: realtime sync disabled for order ' . $order_id);
+            return false;
+        }
+
         $order = wc_get_order($order_id);
-        if ($order) {
-            self::sync_wc_order($order, 'realtime');
-        }
-    }
-
-    public static function handle_store_api_order($order): void {
-        if (!(bool) get_option('cod_crm_realtime_sync_enabled', 1)) {
-            return;
-        }
-        if ($order instanceof WC_Order) {
-            self::sync_wc_order($order, 'realtime');
-        }
-    }
-
-    public static function sync_wc_order(WC_Order $order, string $sync_type = 'realtime'): bool {
-        $payment = $order->get_payment_method();
-        if (!self::can_sync_payment($payment)) {
-            COD_CRM_Sync_Logger::log((string)$order->get_id(), $sync_type, 'skipped', 'Payment method disabled by settings.');
+        if (!$order) {
+            self::debug_log('COD CRM Sync Failed: wc_get_order returned null for order ' . $order_id);
             return false;
         }
 
-        $order_id = (string) $order->get_id();
-        if (COD_CRM_DB::order_exists($order_id)) {
-            COD_CRM_Sync_Logger::log($order_id, $sync_type, 'skipped', 'Duplicate order.');
+        $payment_method = (string) $order->get_payment_method();
+        self::debug_log('COD CRM Payment Method: ' . $payment_method . ' for order ' . $order_id);
+
+        if (!self::can_sync_payment($payment_method)) {
+            COD_CRM_Sync_Logger::log((string) $order_id, 'realtime', 'skipped', 'Payment method disabled by settings.');
+            self::debug_log('COD CRM Sync Skipped: payment filtered for order ' . $order_id);
             return false;
+        }
+
+        $dup_count = (int) $wpdb->get_var(
+            $wpdb->prepare("SELECT COUNT(*) FROM {$orders_table} WHERE order_id = %s", (string) $order_id)
+        );
+        if ($dup_count > 0) {
+            COD_CRM_Sync_Logger::log((string) $order_id, 'realtime', 'skipped', 'Duplicate order detected.');
+            self::debug_log('COD CRM Duplicate Order: ' . $order_id);
+            return false;
+        }
+
+        $customer_name = trim($order->get_billing_first_name() . ' ' . $order->get_billing_last_name());
+        if ($customer_name === '') {
+            $customer_name = trim((string) $order->get_formatted_billing_full_name());
+        }
+        if ($customer_name === '') {
+            $customer_name = __('Guest', 'cod-call-crm');
         }
 
         $full_address = trim(implode(', ', array_filter([
@@ -52,47 +84,75 @@ class COD_CRM_Woo_Sync {
 
         $items = [];
         foreach ($order->get_items() as $item) {
-            $items[] = ['name' => $item->get_name(), 'qty' => $item->get_quantity()];
+            $items[] = [
+                'name' => sanitize_text_field((string) $item->get_name()),
+                'qty' => intval($item->get_quantity()),
+            ];
         }
 
         $agent_id = self::assign_agent();
 
-        $insert = COD_CRM_DB::insert_order([
-            'order_id' => $order_id,
-            'customer_name' => trim($order->get_billing_first_name() . ' ' . $order->get_billing_last_name()),
-            'customer_phone' => $order->get_billing_phone(),
-            'customer_address' => $full_address,
-            'order_amount' => $order->get_total(),
-            'order_items' => $items,
-            'payment_method' => $payment,
-            'wc_order_status' => $order->get_status(),
+        $insert_data = [
+            'order_id' => (string) $order_id,
+            'customer_name' => sanitize_text_field($customer_name),
+            'customer_phone' => sanitize_text_field((string) $order->get_billing_phone()),
+            'customer_address' => wp_kses_post($full_address),
+            'order_amount' => floatval($order->get_total()),
+            'order_items' => wp_json_encode($items),
+            'payment_method' => sanitize_text_field($payment_method),
+            'wc_order_status' => sanitize_text_field((string) $order->get_status()),
             'order_status' => 'pending_call',
+            'total_attempts' => 0,
+            'max_attempts' => intval(get_option('cod_crm_max_attempts', 3)),
             'assigned_agent_id' => $agent_id,
             'source' => 'woocommerce',
             'crm_synced_at' => current_time('mysql'),
-        ]);
+        ];
 
-        if (!$insert) {
-            COD_CRM_Sync_Logger::log($order_id, $sync_type, 'error', 'Insert failed.');
+        $inserted = $wpdb->insert(
+            $orders_table,
+            $insert_data,
+            ['%s','%s','%s','%s','%f','%s','%s','%s','%s','%d','%d','%d','%s','%s']
+        );
+
+        if ($inserted === false) {
+            self::debug_log('COD CRM Insert Failed: ' . $wpdb->last_error);
+            COD_CRM_Sync_Logger::log((string) $order_id, 'realtime', 'error', 'Insert failed: ' . $wpdb->last_error);
             return false;
         }
 
         $order->update_meta_data('_cod_crm_synced', 1);
         $order->save();
 
-        COD_CRM_Sync_Logger::log($order_id, $sync_type, 'success', 'Order synced to CRM.');
-        COD_CRM_Notifications::notify_agent_new_order($agent_id, COD_CRM_DB::get_order($order_id) ?: []);
+        self::debug_log('COD CRM Insert Success: ' . $order_id);
+        COD_CRM_Sync_Logger::log((string) $order_id, 'realtime', 'success', 'Order synced to CRM.');
+
+        $fresh = COD_CRM_DB::get_order((string) $order_id);
+        if ($fresh) {
+            COD_CRM_Notifications::notify_agent_new_order(intval($agent_id), $fresh);
+        }
+
         return true;
     }
 
+    public static function sync_wc_order(WC_Order $order, string $sync_type = 'realtime'): bool {
+        // Keep compatibility with bulk/manual callers while centralizing logic.
+        $ok = self::cod_crm_sync_order((int) $order->get_id());
+        COD_CRM_Sync_Logger::log((string) $order->get_id(), $sync_type, $ok ? 'success' : 'skipped', $ok ? 'Synced via centralized function.' : 'Skipped/failed via centralized function.');
+        return $ok;
+    }
+
     private static function can_sync_payment(string $payment): bool {
+        // Simulated/fallback setting behavior included by defaults in activator.
         if ($payment === 'cod') {
             return (bool) get_option('cod_crm_sync_cod', 1);
         }
-        $prepaid = ['razorpay', 'stripe', 'paypal', 'payu'];
-        if (in_array($payment, $prepaid, true)) {
+
+        $prepaid_methods = ['razorpay', 'stripe', 'paypal', 'payu', 'ccavenue', 'paytm'];
+        if (in_array($payment, $prepaid_methods, true)) {
             return (bool) get_option('cod_crm_sync_prepaid', 1);
         }
+
         return (bool) get_option('cod_crm_sync_other', 0);
     }
 
@@ -111,7 +171,12 @@ class COD_CRM_Woo_Sync {
         $best_id = null;
         $fewest = PHP_INT_MAX;
         foreach ($agents as $agent) {
-            $count = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$table} WHERE assigned_agent_id=%d AND order_status IN ('pending_call','callback_scheduled')", $agent->ID));
+            $count = (int) $wpdb->get_var(
+                $wpdb->prepare(
+                    "SELECT COUNT(*) FROM {$table} WHERE assigned_agent_id=%d AND order_status IN ('pending_call','callback_scheduled')",
+                    $agent->ID
+                )
+            );
             if ($count < $fewest) {
                 $fewest = $count;
                 $best_id = intval($agent->ID);
@@ -123,20 +188,20 @@ class COD_CRM_Woo_Sync {
     }
 
     public static function handle_status_changed($order_id, $old_status, $new_status, $order): void {
-        $crm = COD_CRM_DB::get_order((string)$order_id);
+        $crm = COD_CRM_DB::get_order((string) $order_id);
         if (!$crm) {
             return;
         }
 
         if ($new_status === 'cancelled') {
-            COD_CRM_DB::update_order((string)$order_id, ['order_status' => 'cancelled', 'wc_order_status' => $new_status]);
+            COD_CRM_DB::update_order((string) $order_id, ['order_status' => 'cancelled', 'wc_order_status' => $new_status]);
             COD_CRM_DB::insert_log([
                 'order_id' => $crm['order_id'],
                 'customer_name' => $crm['customer_name'],
                 'customer_phone' => $crm['customer_phone'],
                 'customer_address' => $crm['customer_address'],
                 'order_amount' => $crm['order_amount'],
-                'order_items' => json_decode((string)$crm['order_items'], true),
+                'order_items' => json_decode((string) $crm['order_items'], true),
                 'call_outcome' => 'cancelled',
                 'call_reason' => 'Cancelled from WooCommerce',
                 'agent_id' => 0,
@@ -146,9 +211,9 @@ class COD_CRM_Woo_Sync {
         }
 
         if ($new_status === 'completed') {
-            COD_CRM_DB::update_order((string)$order_id, ['order_status' => 'confirmed', 'wc_order_status' => $new_status]);
+            COD_CRM_DB::update_order((string) $order_id, ['order_status' => 'confirmed', 'wc_order_status' => $new_status]);
         }
 
-        COD_CRM_Sync_Logger::log((string)$order_id, 'status_change', 'success', "Status changed: {$old_status} -> {$new_status}");
+        COD_CRM_Sync_Logger::log((string) $order_id, 'status_change', 'success', "Status changed: {$old_status} -> {$new_status}");
     }
 }
