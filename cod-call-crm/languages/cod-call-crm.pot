@@ -1,0 +1,31 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: COD Call CRM 1.0.0\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: \n"
+
+msgid "COD CRM"
+msgstr ""
+
+msgid "Dashboard"
+msgstr ""
+
+msgid "Call Queue"
+msgstr ""
+
+msgid "All Orders"
+msgstr ""
+
+msgid "Call Logs"
+msgstr ""
+
+msgid "Reports & Analytics"
+msgstr ""
+
+msgid "Import Orders"
+msgstr ""
+
+msgid "Settings"
+msgstr ""
