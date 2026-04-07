@@ -1,0 +1,37 @@
+.cod-order-crm-wrap .cod-order-crm-toolbar,
+.cod-order-crm-wrap .cod-order-crm-bulk {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.cod-order-crm-wrap .cod-order-crm-table-wrap {
+    overflow: auto;
+    max-width: 100%;
+}
+
+#cod-order-crm-table td,
+#cod-order-crm-table th {
+    vertical-align: top;
+    min-width: 120px;
+}
+
+#cod-order-crm-table textarea {
+    width: 180px;
+    min-height: 56px;
+}
+
+.status-green { background: #e7f7ea; }
+.status-red { background: #fdeaea; }
+.status-yellow { background: #fff7d6; }
+.crm-due-followup { outline: 2px solid #2271b1; }
+.crm-risk { color: #d63638; font-weight: 700; }
+
+@media (max-width: 1100px) {
+    #cod-order-crm-table td,
+    #cod-order-crm-table th {
+        min-width: 150px;
+    }
+}
